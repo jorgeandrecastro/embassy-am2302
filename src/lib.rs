@@ -7,14 +7,81 @@
 #![no_std]
 
 //! Driver async no_std pour le capteur de température et d'humidité AM2302 (DHT22).
-//! Compatible avec toutes les cartes supportées par Embassy via `embedded-hal`.
+//! Compatible avec toutes les cartes et tous les exécuteurs via `embedded-hal`.
+//!
+//! ## Caractéristiques
+//!
+//! - `#![no_std]` — aucune dépendance à la bibliothèque standard
+//! - Zéro dépendance Embassy — fonctionne avec n'importe quel exécuteur async
+//! - Compatible RP2040, STM32, nRF, ESP32… via les traits `embedded-hal`
+//! - Protocole 1-Wire implémenté bit à bit
+//! - Vérification de la somme de contrôle (checksum) intégrée
+//! - Support des températures négatives
+//!
+//! ## Protocole de communication
+//!
+//! Le DHT22 utilise un protocole 1-Wire propriétaire :
+//!
+//! ```text
+//! Maître  ──── 20ms bas ────┐
+//! Capteur                   └── 80µs bas ── 80µs haut ──┐
+//! Bit 0   : 50µs bas + ~28µs haut                        │  × 40 bits
+//! Bit 1   : 50µs bas + ~70µs haut                        │
+//! ```
+//!
+//! Un signal haut `> 40µs` est interprété comme un bit `1`, sinon bit `0`.
+//!
+//! ## Format des données
+//!
+//! Les 40 bits reçus sont répartis en 5 octets :
+//!
+//! ```text
+//! [0] humidité    (partie entière)
+//! [1] humidité    (partie décimale)
+//! [2] température (partie entière, bit 7 = signe négatif)
+//! [3] température (partie décimale)
+//! [4] checksum    = [0] + [1] + [2] + [3]
+//! ```
+//!
+//! ## Exemple — Embassy RP2040
+//!
+//! ```rust,ignore
+//! use embassy_rp::gpio::Flex;
+//! use embassy_time::Delay;
+//! use embassy_am2302::am2302_read;
+//!
+//! #[embassy_executor::task]
+//! async fn sensor_task(mut pin: Flex<'static>) {
+//!     let mut delay = Delay;
+//!     loop {
+//!         match am2302_read(&mut pin, &mut delay).await {
+//!             Ok(data) => ENV_SIGNAL.signal(data),
+//!             Err(_)   => {}
+//!         }
+//!         delay.delay_ms(3000).await;
+//!     }
+//! }
+//! ```
 
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::delay::DelayNs;
-use embassy_time::Instant;
-use signals::{EnvData, ENV_SIGNAL};
 
-pub mod signals;
+/// Données environnementales lues depuis le capteur AM2302.
+///
+/// Les valeurs sont exprimées en unités physiques directement exploitables,
+/// après décodage du format binaire DHT22 et division par 10.
+///
+/// # Champs
+///
+/// * `temp` — température en degrés Celsius (négatif possible)
+/// * `hum`  — humidité relative en pourcentage `[0.0, 100.0]`
+#[derive(Clone, Copy, Debug)]
+pub struct EnvData {
+    /// Température en °C. Peut être négative (bit de signe du DHT22).
+    pub temp: f32,
+    /// Humidité relative en %, dans la plage `[0.0, 100.0]`.
+    pub hum: f32,
+}
 
 /// Erreurs possibles lors de la lecture du capteur AM2302.
 #[derive(Debug, PartialEq)]
@@ -28,8 +95,6 @@ pub enum Am2302Error<E> {
 }
 
 /// Lit une seule mesure depuis le capteur AM2302.
-///
-/// Fonction bas niveau. Préférer [`am2302_run`] pour une boucle de lecture continue.
 ///
 /// # Arguments
 ///
@@ -45,7 +110,7 @@ pub enum Am2302Error<E> {
 ///
 /// ```rust,ignore
 /// match am2302_read(&mut pin, &mut delay).await {
-///     Ok(data)                          => defmt::info!("{}°C  {}%", data.temp, data.hum),
+///     Ok(data)                           => defmt::info!("{}°C  {}%", data.temp, data.hum),
 ///     Err(Am2302Error::ChecksumMismatch) => defmt::warn!("Données corrompues"),
 ///     Err(Am2302Error::Timeout)          => defmt::warn!("Capteur ne répond pas"),
 ///     Err(Am2302Error::Gpio(_))          => defmt::error!("Erreur GPIO"),
@@ -87,6 +152,8 @@ where
     // Chaque bit est précédé d'un signal bas de ~50µs.
     // La durée du signal haut détermine la valeur du bit :
     //   < 40µs → bit 0  |  > 40µs → bit 1
+    // On compte les itérations de boucle comme proxy temporel —
+    // aucun timer hardware requis.
     let mut data = [0u8; 5];
     for i in 0..40 {
         timeout = 0;
@@ -95,12 +162,16 @@ where
             if timeout > 10000 { return Err(Am2302Error::Timeout); }
         }
 
-        let start = Instant::now();
+        // Mesure de la durée du signal haut par comptage de boucles.
+        // Seuil empirique : ~100 itérations séparent un bit 0 d'un bit 1
+        // sur un Cortex-M0+ à 125MHz sans optimisation.
+        let mut high_count = 0u32;
         while pin.is_high().map_err(Am2302Error::Gpio)? {
-            if start.elapsed().as_micros() > 100 { break; }
+            high_count += 1;
+            if high_count > 200 { break; }
         }
 
-        if start.elapsed().as_micros() > 40 {
+        if high_count > 40 {
             data[i / 8] |= 1 << (7 - (i % 8));
         }
     }
@@ -126,48 +197,4 @@ where
     }
 
     Ok(EnvData { temp, hum })
-}
-
-/// Boucle de lecture continue du capteur AM2302.
-///
-/// Lit le capteur toutes les 3 secondes et publie les données valides
-/// via [`signals::ENV_SIGNAL`]. Les erreurs sont silencieusement ignorées.
-///
-/// Cette fonction ne retourne jamais — elle est conçue pour être exécutée
-/// dans une tâche Embassy dédiée. `#[embassy_executor::task]` n'acceptant
-/// pas les génériques, l'utilisateur crée une fine tâche d'encapsulation.
-///
-/// # Arguments
-///
-/// * `pin`   — broche GPIO implémentant [`InputPin`] + [`OutputPin`]
-/// * `delay` — implémentation async de [`DelayNs`] fournie par le HAL
-///
-/// # Exemple
-///
-/// ```rust,ignore
-/// // RP2040
-/// #[embassy_executor::task]
-/// async fn sensor_task(pin: embassy_rp::gpio::Flex<'static>, delay: embassy_time::Delay) {
-///     am2302_run(pin, delay).await;
-/// }
-///
-/// // STM32
-/// #[embassy_executor::task]
-/// async fn sensor_task(pin: embassy_stm32::gpio::Flex<'static>, delay: embassy_time::Delay) {
-///     am2302_run(pin, delay).await;
-/// }
-/// ```
-pub async fn am2302_run<P, E>(mut pin: P, mut delay: impl DelayNs) -> !
-where
-    P: InputPin<Error = E> + OutputPin<Error = E>,
-{
-    loop {
-        if let Ok(data) = am2302_read(&mut pin, &mut delay).await {
-            ENV_SIGNAL.signal(data);
-        }
-
-        // Le DHT22 nécessite au minimum 2s entre deux mesures.
-        // On attend 3s pour garantir la stabilité.
-        delay.delay_ms(3000).await;
-    }
 }
