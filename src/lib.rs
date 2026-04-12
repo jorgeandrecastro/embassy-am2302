@@ -6,59 +6,40 @@
 
 #![no_std]
 
-//! Driver async no_std pour le capteur de température et d'humidité AM2302 (DHT22).
-//! Compatible avec toutes les cartes et tous les exécuteurs via `embedded-hal`.
+//! Driver async `no_std` pour le capteur AM2302 (DHT22).
+//! Compatible avec toutes les cartes via `embedded-hal`.
 //!
-//! ## Caractéristiques
+//! ## Calibration du seuil
 //!
-//! - `#![no_std]` — aucune dépendance à la bibliothèque standard
-//! - Zéro dépendance Embassy — fonctionne avec n'importe quel exécuteur async
-//! - Compatible RP2040, STM32, nRF, ESP32… via les traits `embedded-hal`
-//! - Protocole 1-Wire implémenté bit à bit
-//! - Vérification de la somme de contrôle (checksum) intégrée
-//! - Support des températures négatives
+//! Le DHT22 encode ses bits par la durée relative du signal haut :
+//! ~28 µs → bit `0`, ~70 µs → bit `1`. Cette crate mesure cette durée
+//! par **comptage d'itérations de boucle**. Le seuil dépend de la
+//! fréquence du MCU — passez la constante correspondant à votre carte :
 //!
-//! ## Protocole de communication
+//! | Carte          | Fréquence | Constante                  |
+//! |----------------|-----------|----------------------------|
+//! | Raspberry Pi Pico 2 (RP2350) | 150 MHz | [`PICO2_BIT_THRESHOLD`] |
+//! | Raspberry Pi Pico (RP2040)   | 125 MHz | [`PICO_BIT_THRESHOLD`]  |
 //!
-//! Le DHT22 utilise un protocole 1-Wire propriétaire :
+//! Pour toute autre carte, calibrez avec un oscilloscope ou ajustez
+//! empiriquement jusqu'à obtenir des lectures cohérentes.
 //!
-//! ```text
-//! Maître  ──── 20ms bas ────┐
-//! Capteur                   └── 80µs bas ── 80µs haut ──┐
-//! Bit 0   : 50µs bas + ~28µs haut                        │  × 40 bits
-//! Bit 1   : 50µs bas + ~70µs haut                        │
-//! ```
-//!
-//! Un signal haut `> 40µs` est interprété comme un bit `1`, sinon bit `0`.
-//!
-//! ## Format des données
-//!
-//! Les 40 bits reçus sont répartis en 5 octets :
-//!
-//! ```text
-//! [0] humidité    (partie entière)
-//! [1] humidité    (partie décimale)
-//! [2] température (partie entière, bit 7 = signe négatif)
-//! [3] température (partie décimale)
-//! [4] checksum    = [0] + [1] + [2] + [3]
-//! ```
-//!
-//! ## Exemple — Embassy RP2040
+//! ## Exemple — Embassy RP2350
 //!
 //! ```rust,ignore
 //! use embassy_rp::gpio::Flex;
-//! use embassy_time::Delay;
-//! use embassy_am2302::am2302_read;
+//! use embassy_time::{Duration, Timer, Delay};
+//! use embassy_am2302::{am2302_read, PICO2_BIT_THRESHOLD};
 //!
 //! #[embassy_executor::task]
 //! async fn sensor_task(mut pin: Flex<'static>) {
 //!     let mut delay = Delay;
 //!     loop {
-//!         match am2302_read(&mut pin, &mut delay).await {
-//!             Ok(data) => ENV_SIGNAL.signal(data),
+//!         match am2302_read(&mut pin, &mut delay, PICO2_BIT_THRESHOLD).await {
+//!             Ok(data) => defmt::info!("{}°C  {}%", data.temp, data.hum),
 //!             Err(_)   => {}
 //!         }
-//!         delay.delay_ms(3000).await;
+//!         Timer::after(Duration::from_secs(3)).await;
 //!     }
 //! }
 //! ```
@@ -66,18 +47,20 @@
 use embedded_hal::digital::{InputPin, OutputPin};
 use embedded_hal_async::delay::DelayNs;
 
+/// Seuil calibré pour le **Raspberry Pi Pico 2 (RP2350)** à 150 MHz.
+///
+/// Passez cette constante à [`am2302_read`] lorsque vous ciblez la Pico 2.
+pub const PICO2_BIT_THRESHOLD: u32 = 40;
+
+/// Seuil calibré pour le **Raspberry Pi Pico (RP2040)** à 125 MHz.
+///
+/// Passez cette constante à [`am2302_read`] lorsque vous ciblez la Pico 1.
+pub const PICO_BIT_THRESHOLD: u32 = 33;
+
 /// Données environnementales lues depuis le capteur AM2302.
-///
-/// Les valeurs sont exprimées en unités physiques directement exploitables,
-/// après décodage du format binaire DHT22 et division par 10.
-///
-/// # Champs
-///
-/// * `temp` — température en degrés Celsius (négatif possible)
-/// * `hum`  — humidité relative en pourcentage `[0.0, 100.0]`
 #[derive(Clone, Copy, Debug)]
 pub struct EnvData {
-    /// Température en °C. Peut être négative (bit de signe du DHT22).
+    /// Température en °C. Peut être négative (bit de signe DHT22).
     pub temp: f32,
     /// Humidité relative en %, dans la plage `[0.0, 100.0]`.
     pub hum: f32,
@@ -94,45 +77,35 @@ pub enum Am2302Error<E> {
     Gpio(E),
 }
 
-/// Lit une seule mesure depuis le capteur AM2302.
+/// Lit une mesure depuis le capteur AM2302.
 ///
 /// # Arguments
 ///
-/// * `pin`   — broche GPIO implémentant [`InputPin`] + [`OutputPin`]
-/// * `delay` — implémentation async de [`DelayNs`] fournie par le HAL
+/// * `pin`           — broche GPIO implémentant [`InputPin`] + [`OutputPin`]
+/// * `delay`         — implémentation async de [`DelayNs`] fournie par le HAL
+/// * `bit_threshold` — seuil de comptage pour distinguer bit `0` et bit `1`.
+///   Utilisez [`PICO2_BIT_THRESHOLD`] pour la Pico 2, [`PICO_BIT_THRESHOLD`]
+///   pour la Pico 1, ou calibrez pour votre MCU.
 ///
 /// # Retour
 ///
 /// `Ok(EnvData)` si la lecture et le checksum sont valides,
 /// `Err(Am2302Error)` sinon.
-///
-/// # Exemple
-///
-/// ```rust,ignore
-/// match am2302_read(&mut pin, &mut delay).await {
-///     Ok(data)                           => defmt::info!("{}°C  {}%", data.temp, data.hum),
-///     Err(Am2302Error::ChecksumMismatch) => defmt::warn!("Données corrompues"),
-///     Err(Am2302Error::Timeout)          => defmt::warn!("Capteur ne répond pas"),
-///     Err(Am2302Error::Gpio(_))          => defmt::error!("Erreur GPIO"),
-/// }
-/// ```
 pub async fn am2302_read<P, E>(
     pin: &mut P,
     delay: &mut impl DelayNs,
+    bit_threshold: u32,
 ) -> Result<EnvData, Am2302Error<E>>
 where
     P: InputPin<Error = E> + OutputPin<Error = E>,
 {
-    // 1. SIGNAL DE START
-    // La spec DHT22 exige minimum 1ms ; on utilise 20ms pour la robustesse.
+    // 1. SIGNAL DE START — 20 ms à l'état bas
     pin.set_low().map_err(Am2302Error::Gpio)?;
     delay.delay_ms(20).await;
     pin.set_high().map_err(Am2302Error::Gpio)?;
 
-    // 2. ATTENTE DU HANDSHAKE
-    // Séquence : attente bas (80µs) → haut (80µs) → fin handshake
+    // 2. HANDSHAKE
     let mut timeout = 0u32;
-
     while pin.is_high().map_err(Am2302Error::Gpio)? {
         timeout += 1;
         if timeout > 10000 { return Err(Am2302Error::Timeout); }
@@ -149,35 +122,28 @@ where
     }
 
     // 3. LECTURE DES 40 BITS
-    // Chaque bit est précédé d'un signal bas de ~50µs.
-    // La durée du signal haut détermine la valeur du bit :
-    //   < 40µs → bit 0  |  > 40µs → bit 1
-    // On compte les itérations de boucle comme proxy temporel —
-    // aucun timer hardware requis.
+    // Signal haut court (< bit_threshold itérations) → bit 0
+    // Signal haut long  (> bit_threshold itérations) → bit 1
     let mut data = [0u8; 5];
-    for i in 0..40 {
+    for i in 0..40usize {
         timeout = 0;
         while pin.is_low().map_err(Am2302Error::Gpio)? {
             timeout += 1;
             if timeout > 10000 { return Err(Am2302Error::Timeout); }
         }
 
-        // Mesure de la durée du signal haut par comptage de boucles.
-        // Seuil empirique : ~100 itérations séparent un bit 0 d'un bit 1
-        // sur un Cortex-M0+ à 125MHz sans optimisation.
         let mut high_count = 0u32;
         while pin.is_high().map_err(Am2302Error::Gpio)? {
             high_count += 1;
-            if high_count > 200 { break; }
+            if high_count > bit_threshold * 5 { break; }
         }
 
-        if high_count > 40 {
+        if high_count > bit_threshold {
             data[i / 8] |= 1 << (7 - (i % 8));
         }
     }
 
     // 4. VALIDATION DU CHECKSUM
-    // Le checksum est la somme tronquée des 4 premiers octets.
     let checksum = data[0]
         .wrapping_add(data[1])
         .wrapping_add(data[2])
@@ -190,10 +156,9 @@ where
     // 5. DÉCODAGE
     let hum = (((data[0] as u16) << 8) | data[1] as u16) as f32 / 10.0;
 
-    // Bit 7 de data[2] = indicateur de signe négatif
     let mut temp = ((((data[2] & 0x7F) as u16) << 8) | data[3] as u16) as f32 / 10.0;
-    if (data[2] & 0x80) != 0 {
-        temp *= -1.0;
+    if data[2] & 0x80 != 0 {
+        temp = -temp;
     }
 
     Ok(EnvData { temp, hum })

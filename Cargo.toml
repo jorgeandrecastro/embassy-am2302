@@ -1,6 +1,6 @@
 [package]
 name = "embassy-am2302"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 authors = ["Jorge Andre Castro <georgeandrec@gmail.com>"]
 build = false
@@ -10,7 +10,7 @@ autoexamples = false
 autotests = false
 autobenches = false
 license = "GPL-2.0-or-later"
-description = "Driver async no_std pour le capteur AM2302 (DHT22), compatible toutes cartes via embedded-hal."
+description = "Driver async no_std pour le capteur AM2302 (DHT22), calibrable par seuil, compatible toutes cartes via embedded-hal."
 repository = "https://github.com/jorgeandrecastro/embassy-am2302"
 documentation = "https://docs.rs/embassy-am2302"
 readme = "README.md"
