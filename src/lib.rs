@@ -89,7 +89,7 @@ where
 {
     // 1. SIGNAL DE START — 20 ms à l'état bas
     pin.set_low().map_err(Am2302Error::Gpio)?;
-    Timer::after(Duration::from_millis(20)).await;  // embassy-time, pas de DelayNs
+    Timer::after(Duration::from_millis(20)).await;
     pin.set_high().map_err(Am2302Error::Gpio)?;
 
     // 2. HANDSHAKE
@@ -141,7 +141,7 @@ where
     }
 
     // 5. DÉCODAGE
-    let hum  = (((data[0] as u16) << 8) | data[1] as u16) as f32 / 10.0;
+    let hum = (((data[0] as u16) << 8) | data[1] as u16) as f32 / 10.0;
     let mut temp = ((((data[2] & 0x7F) as u16) << 8) | data[3] as u16) as f32 / 10.0;
     if data[2] & 0x80 != 0 { temp = -temp; }
 

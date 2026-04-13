@@ -1,14 +1,7 @@
 // Copyright (C) 2026 Jorge Andre Castro
-//
-// Ce programme est un logiciel libre : vous pouvez le redistribuer et/ou le modifier
-// selon les termes de la Licence Publique Générale GNU telle que publiée par la
-// Free Software Foundation, soit la version 2 de la licence, soit (à votre convention)
-// n'importe quelle version ultérieure.
+// GPL-2.0-or-later
 
-//! # signals
-//!
 //! Signal global portant la dernière mesure publiée par [`crate::am2302_read`].
-//! et le reste de l'application.
 //!
 //! ## Utilisation
 //!
@@ -28,31 +21,9 @@
 //! }
 //! ```
 
+use crate::EnvData;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 
-/// Données environnementales lues depuis le capteur AM2302.
-///
-/// Les valeurs sont exprimées en unités physiques directement exploitables,
-/// après décodage du format binaire DHT22 et division par 10.
-///
-/// # Champs
-///
-/// * `temp` — température en degrés Celsius (négatif possible)
-/// * `hum`  — humidité relative en pourcentage `[0.0, 100.0]`
-///
-/// # Exemple
-///
-/// ```rust,ignore
-/// let data = ENV_SIGNAL.wait().await;
-/// assert!(data.hum >= 0.0 && data.hum <= 100.0);
-/// ```
-#[derive(Clone, Copy)]
-pub struct EnvData {
-    /// Température en °C. Peut être négative (bit de signe du DHT22).
-    pub temp: f32,
-    /// Humidité relative en %, dans la plage `[0.0, 100.0]`.
-    pub hum: f32,
-}
 /// Signal global portant la dernière mesure publiée par [`crate::am2302_read`].
 ///
 /// Utilise un mutex section critique (`CriticalSectionRawMutex`),

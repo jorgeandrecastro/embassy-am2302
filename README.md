@@ -1,182 +1,109 @@
-# embassy-am2302
+# embassy-am2302 (v0.5.0) 🦅
 
-Driver async `no_std` pour le capteur de température et d'humidité **AM2302 (DHT22)**.
-Basé directement sur **Embassy** (`embassy-time`, `embassy-sync`) et `embedded-hal` pour les traits de pin.
+Driver async no_std pour le capteur de température et d'humidité AM2302 (DHT22).
 
-> ⚠️ **La version 0.2.x et 0.3.x sont  obsolètes.** Elle utilisait un seuil fixe non documenté.
-> La **0.4.0** expose le seuil en paramètre, utilise `embassy-time` pour les délais
-> et `embedded-hal` uniquement pour les traits de pin — compatible avec toutes les cartes Embassy.
+Conçu spécifiquement pour l'écosystème Embassy (embassy-time, embassy-sync) et compatible avec toutes les cartes grâce à embedded-hal.
 
----
+> ⚠️ **IMPORTANT** : Les versions antérieures (0.2.x à 0.4.x) sont obsolètes suite à des problèmes de typage inter-tâches. La v0.5.0 est la version stable recommandée qui corrige les conflits de structures EnvData lors de l'utilisation des signaux.
 
 ## Fonctionnalités
 
-- Entièrement asynchrone via `embassy-time`
-- **Compatible toutes cartes Embassy** — `embassy-rp`, `embassy-stm32`, `embassy-nrf`, etc.
-- **Aucun timer hardware requis** — mesure des bits par comptage de boucles
-- Seuil de détection **passé en paramètre** — portable sur tout MCU
-- Constantes précalibrées pour la Pico 2 et la Pico 1
-- Vérification du checksum intégrée
-- Support des températures négatives
-- Compatible `no_std`, aucune allocation dynamique
-
----
+- **Async Natif** : Entièrement asynchrone via embassy-time.
+- **Universel** : Compatible avec embassy-rp, embassy-stm32, embassy-nrf, etc.
+- **Ultra-Précis** : Mesure des bits par comptage de boucles (évite le jitter des interruptions).
+- **Découplage Inter-tâches** : Inclut un module signals pour envoyer les données entre vos tâches sans effort.
+- **Zéro Allocation** : Compatible no_std, idéal pour les kernels comme JC-OS.
 
 ## Installation
 
 ```toml
 [dependencies]
-embassy-am2302 = "0.3"
+embassy-am2302 = "0.5.0"
 embassy-time   = { version = "0.4.0" }
 embassy-sync   = { version = "0.6.0" }
 embedded-hal   = { version = "1.0" }
 ```
 
----
-
-## Utilisation
+## Utilisation Rapide
 
 ```rust
 use embassy_am2302::{am2302_read, PICO2_BIT_THRESHOLD};
 
+// Lecture directe (besoin d'une pin implémentant InputPin + OutputPin, ex: Flex)
 match am2302_read(&mut pin, PICO2_BIT_THRESHOLD).await {
-    Ok(data)                           => defmt::info!("{}°C  {}%", data.temp, data.hum),
-    Err(Am2302Error::ChecksumMismatch) => defmt::warn!("Données corrompues"),
-    Err(Am2302Error::Timeout)          => defmt::warn!("Capteur ne répond pas"),
-    Err(Am2302Error::Gpio(_))          => defmt::error!("Erreur GPIO"),
+    Ok(data) => defmt::info!("{:.1}°C  {:.1}%", data.temp, data.hum),
+    Err(e)   => defmt::error!("Erreur lecture : {:?}", e),
 }
 ```
 
----
+## Constantes de seuil (Calibration)
 
-## Constantes de seuil
+Le DHT22 est sensible à la fréquence de votre CPU. Utilisez ces constantes ou calculez la vôtre :
 
-| Constante             | Carte                        | Fréquence |
-|-----------------------|------------------------------|-----------|
-| `PICO2_BIT_THRESHOLD` | Raspberry Pi Pico 2 (RP2350) | 150 MHz   |
-| `PICO_BIT_THRESHOLD`  | Raspberry Pi Pico (RP2040)   | 125 MHz   |
+| Constante | Carte | Fréquence |
+|-----------|-------|-----------|
+| `PICO2_BIT_THRESHOLD` | Raspberry Pi Pico 2 (RP2350) | 150 MHz |
+| `PICO_BIT_THRESHOLD` | Raspberry Pi Pico (RP2040) | 125 MHz |
 
-Pour tout autre MCU, calibrez empiriquement ou avec un oscilloscope.
-Formule de départ : `threshold = fréquence_mhz * 28 / 1000`.
+## Architecture Multi-tâches (Exemple Recommandé)
 
----
+Pour un projet propre (comme dans JC-OS), utilisez le signal intégré pour séparer la lecture de l'affichage.
 
-## Exemple complet — Embassy RP2350 avec LCD HD44780
+### 1. Le Signal (signals.rs)
 
-**`signals.rs`** :
+Le signal utilise une section critique pour être accessible partout.
 
 ```rust
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
-use embassy_am2302::EnvData;
-
-pub static ENV_SIGNAL: Signal<CriticalSectionRawMutex, EnvData> = Signal::new();
+use embassy_am2302::signals::ENV_SIGNAL;
 ```
 
-**`tasks.rs`** — lecture capteur :
+### 2. Tâche de lecture
 
 ```rust
-use embassy_rp::gpio::Flex;
-use embassy_time::{Duration, Timer};
-use embassy_am2302::{am2302_read, PICO2_BIT_THRESHOLD};
-use crate::signals::ENV_SIGNAL;
-
 #[embassy_executor::task]
 pub async fn am2302_task(mut pin: Flex<'static>) {
     loop {
+        // Le capteur est vicieux, on ignore les erreurs isolées
         if let Ok(data) = am2302_read(&mut pin, PICO2_BIT_THRESHOLD).await {
-            ENV_SIGNAL.signal(data);
+            ENV_SIGNAL.signal(data); // Envoi au reste du système
         }
-        Timer::after(Duration::from_secs(3)).await;
+        Timer::after(Duration::from_secs(2)).await; // Respecter le cycle du DHT22
     }
 }
 ```
 
-**`tasks.rs`** — affichage LCD :
+### 3. Tâche d'affichage (LCD HD44780)
 
 ```rust
-use hd44780_i2c_nostd::LcdI2c;
-use embassy_rp::i2c::{I2c, Async};
-use embassy_rp::peripherals::I2C0;
-use embassy_time::{Delay, Timer, Duration};
-use core::fmt::Write;
-use heapless::String;
-use crate::signals::ENV_SIGNAL;
-
 #[embassy_executor::task]
 pub async fn lcd_task(mut lcd: LcdI2c<I2c<'static, I2C0, Async>>) {
-    let mut delay = Delay;
-    let mut show_env = false;
-
     loop {
-        let _ = lcd.clear(&mut delay).await;
-
-        if show_env {
-            if let Some(env) = ENV_SIGNAL.try_take() {
-                let _ = lcd.set_cursor(0, 0, &mut delay).await;
-                let mut s: String<16> = String::new();
-                let _ = write!(s, "TEMP: {:.1} C", env.temp);
-                let _ = lcd.write_str(&s, &mut delay).await;
-
-                let _ = lcd.set_cursor(1, 0, &mut delay).await;
-                s.clear();
-                let _ = write!(s, "HUM : {:.1} %", env.hum);
-                let _ = lcd.write_str(&s, &mut delay).await;
-            } else {
-                let _ = lcd.set_cursor(0, 0, &mut delay).await;
-                let _ = lcd.write_str("AM2302 SENSOR", &mut delay).await;
-                let _ = lcd.set_cursor(1, 0, &mut delay).await;
-                let _ = lcd.write_str("READING...", &mut delay).await;
-            }
-        } else {
-            let _ = lcd.set_cursor(0, 0, &mut delay).await;
-            let _ = lcd.write_str("  JC-OS KERNEL", &mut delay).await;
-            let _ = lcd.set_cursor(1, 0, &mut delay).await;
-            let _ = lcd.write_str("  SYSTEM READY", &mut delay).await;
-        }
-
-        show_env = !show_env;
-        Timer::after(Duration::from_secs(3)).await;
+        let env = ENV_SIGNAL.wait().await; // Attend une nouvelle mesure
+        
+        let mut s: String<16> = String::new();
+        write!(s, "{:.1}C  {:.1}%", env.temp, env.hum).unwrap();
+        
+        lcd.clear(&mut Delay).await.ok();
+        lcd.write_str(s.as_str(), &mut Delay).await.ok();
     }
 }
 ```
 
-**`main.rs`** :
+## Pourquoi cette version ?
 
-```rust
-let pin = Flex::new(p.PIN_2);
-spawner.spawn(tasks::am2302_task(pin)).unwrap();
-spawner.spawn(tasks::lcd_task(lcd)).unwrap();
-```
+- Le protocole du AM2302 est basé sur des durées de microsecondes (28µs pour un 0, 70µs pour un 1).
+- **embedded-hal** : Utilisé pour l'abstraction des pins, permettant d'utiliser ce driver sur n'importe quel microcontrôleur.
+- **embassy-time** : Assure que le signal de "Start" (20ms) est respecté sans bloquer les autres tâches asynchrones.
+- **signals** : Correction majeure de la v0.5.0 assurant que EnvData est un type unique et cohérent dans toute l'application.
 
----
+## Copyright
 
-## Pourquoi `embedded-hal` pour les pins et `embassy-time` pour les délais ?
-
-Le DHT22 encode ses bits par la **durée relative** du signal haut (~28 µs pour un `0`,
-~70 µs pour un `1`). Cette crate mesure cette durée par comptage d'itérations de boucle,
-ce qui évite tout timer hardware.
-
-En revanche, le **signal de start de 20 ms** doit être précis — `embassy-time::Timer`
-garantit ce délai sans bloquer le CPU ni dépendre d'un HAL spécifique.
-
-Les traits `InputPin`/`OutputPin` d'`embedded-hal` permettent d'accepter n'importe quelle
-broche Embassy (`Flex` de rp, stm32, nrf…) sans lier la crate à un MCU particulier.
-
----
-
-## Migration depuis 0.2.x
-
-| 0.2.x | 0.4.0 |
-|-------|-------|
-| `am2302_read(&mut pin, &mut delay, threshold)` | `am2302_read(&mut pin, threshold)` |
-| `delay` passé en paramètre (`embedded-hal-async`) | `embassy-time` utilisé en interne |
-| Dépendance `embedded-hal-async` | Supprimée — remplacée par `embassy-time` |
-
----
-  
 Copyright (C) 2026 Jorge Andre Castro
+
+
 
 ## Licence
 
-Ce projet est distribué sous licence **GPL-2.0-or-later**.
-Voir le fichier [LICENSE](./LICENSE) pour les détails.
+Ce projet est distribué sous licence GPL-2.0-or-later.
+
+Voir le fichier LICENSE pour les détails.
