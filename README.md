@@ -1,106 +1,129 @@
-# embassy-am2302 (v0.5.0) 🦅
+# embassy-am2302 (v0.5.1) 🦅
 
 Driver async no_std pour le capteur de température et d'humidité AM2302 (DHT22).
 
-Conçu spécifiquement pour l'écosystème Embassy (embassy-time, embassy-sync) et compatible avec toutes les cartes grâce à embedded-hal.
+Conçu spécifiquement pour l'écosystème Embassy (embassy-time, embassy-sync) et optimisé pour les performances du RP2350 (Pico 2).
 
-> ⚠️ **IMPORTANT** : Les versions antérieures (0.2.x à 0.4.x) sont obsolètes suite à des problèmes de typage inter-tâches. La v0.5.0 est la version stable recommandée qui corrige les conflits de structures EnvData lors de l'utilisation des signaux.
+## ⚠️ VERSIONS DÉPRÉCIÉES
+
+**Les versions 0.1.x, 0.2.x, 0.3.x et 0.4.x sont DÉPRÉCIÉES et ne doivent plus être utilisées.**
+
+Ces versions anciennes souffrent de :
+- Conflits de structures EnvData inter-tâches
+- Problèmes de typages critiques
+- Incompatibilités avec le système de signaux
+- Comportements instables en async
+
+**Utilisez obligatoirement la v0.5.1 ou supérieure.**
+
+## 🔴 ATTENTION CRITIQUE
+
+> La v0.5.1 corrige les conflits de structures EnvData lors de l'utilisation des signaux inter-tâches. C'est l'**unique version stable recommandée** pour tout projet asynchrone.
 
 ## Fonctionnalités
 
-- **Async Natif** : Entièrement asynchrone via embassy-time.
-- **Universel** : Compatible avec embassy-rp, embassy-stm32, embassy-nrf, etc.
-- **Ultra-Précis** : Mesure des bits par comptage de boucles (évite le jitter des interruptions).
-- **Découplage Inter-tâches** : Inclut un module signals pour envoyer les données entre vos tâches sans effort.
-- **Zéro Allocation** : Compatible no_std, idéal pour les kernels comme JC-OS.
+- **Async Natif** : Entièrement non-bloquant via embassy-time.
+- **Calibration RP2350** : Testé et validé sur Pico 2 avec des seuils adaptés à la vitesse du processeur.
+- **Découplage Inter-tâches** : Module signals intégré pour une communication thread-safe entre vos tâches.
+- **Zéro Allocation** : Idéal pour les systèmes bare-metal et les kernels comme JC-OS.
 
 ## Installation
 
 ```toml
 [dependencies]
-embassy-am2302 = "0.5.0"
+embassy-am2302 = "0.5.1"
 embassy-time   = { version = "0.4.0" }
 embassy-sync   = { version = "0.6.0" }
 embedded-hal   = { version = "1.0" }
 ```
 
-## Utilisation Rapide
-
-```rust
-use embassy_am2302::{am2302_read, PICO2_BIT_THRESHOLD};
-
-// Lecture directe (besoin d'une pin implémentant InputPin + OutputPin, ex: Flex)
-match am2302_read(&mut pin, PICO2_BIT_THRESHOLD).await {
-    Ok(data) => defmt::info!("{:.1}°C  {:.1}%", data.temp, data.hum),
-    Err(e)   => defmt::error!("Erreur lecture : {:?}", e),
-}
-```
-
 ## Constantes de seuil (Calibration)
 
-Le DHT22 est sensible à la fréquence de votre CPU. Utilisez ces constantes ou calculez la vôtre :
+Le DHT22 mesure la durée des impulsions. La vitesse du processeur influence le comptage. Voici les valeurs validées :
 
-| Constante | Carte | Fréquence |
-|-----------|-------|-----------|
-| `PICO2_BIT_THRESHOLD` | Raspberry Pi Pico 2 (RP2350) | 150 MHz |
-| `PICO_BIT_THRESHOLD` | Raspberry Pi Pico (RP2040) | 125 MHz |
+| Constante | Carte | Fréquence | Seuil Recommandé |
+|-----------|-------|-----------|-----------------|
+| `PICO2_BIT_THRESHOLD` | Raspberry Pi Pico 2 | 150 MHz | 120 (Validé) |
+| `PICO_BIT_THRESHOLD` | Raspberry Pi Pico | 125 MHz | 40 |
 
-## Architecture Multi-tâches (Exemple Recommandé)
+**Note** : Si vous utilisez des câbles longs, privilégiez un seuil plus élevé.
 
-Pour un projet propre (comme dans JC-OS), utilisez le signal intégré pour séparer la lecture de l'affichage.
+## Exemple Complet : Intégration JC-OS (LCD + Capteur)
 
-### 1. Le Signal (signals.rs)
-
-Le signal utilise une section critique pour être accessible partout.
+Voici comment orchestrer le capteur et un écran LCD HD44780 en utilisant le multitâche Embassy.
 
 ```rust
+#![no_std]
+#![no_main]
+
+use embassy_executor::Spawner;
+use embassy_rp::gpio::{Flex, Pull};
+use embassy_rp::i2c::{Config as I2cConfig, I2c};
+use embassy_time::{Delay, Duration, Timer};
+use hd44780_i2c_nostd::LcdI2c;
+use core::fmt::Write;
+use heapless::String;
+
+// Utilisation du driver et du signal global
+use embassy_am2302::{am2302_read, EnvData};
 use embassy_am2302::signals::ENV_SIGNAL;
-```
 
-### 2. Tâche de lecture
-
-```rust
 #[embassy_executor::task]
-pub async fn am2302_task(mut pin: Flex<'static>) {
+async fn sensor_task(mut pin: Flex<'static>) {
     loop {
-        // Le capteur est vicieux, on ignore les erreurs isolées
-        if let Ok(data) = am2302_read(&mut pin, PICO2_BIT_THRESHOLD).await {
-            ENV_SIGNAL.signal(data); // Envoi au reste du système
+        // Seuil 120 optimisé pour la vitesse de la Pico 2
+        match am2302_read(&mut pin, 120).await { 
+            Ok(data) => ENV_SIGNAL.signal(data),
+            Err(_)   => ENV_SIGNAL.signal(EnvData { temp: 999.0, hum: 0.0 }),
         }
-        Timer::after(Duration::from_secs(2)).await; // Respecter le cycle du DHT22
+        Timer::after(Duration::from_millis(2500)).await;
     }
 }
-```
 
-### 3. Tâche d'affichage (LCD HD44780)
-
-```rust
 #[embassy_executor::task]
-pub async fn lcd_task(mut lcd: LcdI2c<I2c<'static, I2C0, Async>>) {
+async fn display_task(mut lcd: LcdI2c<I2c<'static, embassy_rp::peripherals::I2C0, embassy_rp::i2c::Async>>) {
+    let mut delay = Delay;
+    lcd.init(&mut delay).await.ok();
+    lcd.set_backlight(true).ok();
+
     loop {
-        let env = ENV_SIGNAL.wait().await; // Attend une nouvelle mesure
+        let data = ENV_SIGNAL.wait().await; // Attend la mesure de sensor_task
+        let _ = lcd.clear(&mut delay).await;
         
         let mut s: String<16> = String::new();
-        write!(s, "{:.1}C  {:.1}%", env.temp, env.hum).unwrap();
-        
-        lcd.clear(&mut Delay).await.ok();
-        lcd.write_str(s.as_str(), &mut Delay).await.ok();
+        if data.temp > 500.0 {
+            write!(lcd, "SENSOR ERROR").ok();
+        } else {
+            write!(s, "T: {:.1} C", data.temp).ok();
+            lcd.set_cursor(0, 0, &mut delay).await.ok();
+            lcd.write_str(s.as_str(), &mut delay).await.ok();
+        }
     }
 }
 ```
 
-## Pourquoi cette version ?
+## Schéma de Câblage (Pico 2)
 
-- Le protocole du AM2302 est basé sur des durées de microsecondes (28µs pour un 0, 70µs pour un 1).
-- **embedded-hal** : Utilisé pour l'abstraction des pins, permettant d'utiliser ce driver sur n'importe quel microcontrôleur.
-- **embassy-time** : Assure que le signal de "Start" (20ms) est respecté sans bloquer les autres tâches asynchrones.
-- **signals** : Correction majeure de la v0.5.0 assurant que EnvData est un type unique et cohérent dans toute l'application.
+Pour éviter les erreurs 999.0 (Sensor Error), respectez scrupuleusement ce montage :
+
+- **VCC** : Reliez au VBUS (5V) pour plus de stabilité.
+- **DATA** : Pin GP22 (Pin 29 physique).
+- **GND** : Masse commune.
+- **PULL-UP** : Ajoutez une résistance physique de 4.7kΩ entre DATA et 3.3V.
+
+## Pourquoi cette architecture ?
+
+L'utilisation du ENV_SIGNAL intégré permet un découplage total :
+
+- Votre tâche de lecture gère le timing critique du capteur.
+- Votre tâche d'affichage (ou de log) réagit instantanément dès qu'une donnée est disponible.
+- Aucune variable globale risquée (`static mut`), tout passe par un Signal sécurisé par section critique.
 
 ## Copyright
 
 Copyright (C) 2026 Jorge Andre Castro
 
-
+Signé : The Rust Eagle 🦅
 
 ## Licence
 
