@@ -7,7 +7,7 @@
 
 //! # signals
 //!
-//! Canal de communication entre la tâche de lecture [`crate::am2302_run`]
+//! Signal global portant la dernière mesure publiée par [`crate::am2302_read`].
 //! et le reste de l'application.
 //!
 //! ## Utilisation
@@ -53,8 +53,7 @@ pub struct EnvData {
     /// Humidité relative en %, dans la plage `[0.0, 100.0]`.
     pub hum: f32,
 }
-
-/// Signal global portant la dernière mesure publiée par [`crate::am2302_run`].
+/// Signal global portant la dernière mesure publiée par [`crate::am2302_read`].
 ///
 /// Utilise un mutex section critique (`CriticalSectionRawMutex`),
 /// compatible avec les environnements sans OS (bare-metal, `no_std`).

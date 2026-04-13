@@ -1,19 +1,18 @@
 # embassy-am2302
 
 Driver async `no_std` pour le capteur de température et d'humidité **AM2302 (DHT22)**.
-Compatible avec toutes les cartes via [`embedded-hal`](https://github.com/rust-embedded/embedded-hal).
+Basé directement sur **Embassy** (`embassy-time`, `embassy-sync`) et `embedded-hal` pour les traits de pin.
 
-> ⚠️ **La version 0.1.0 est obsolète.** Elle dépendait d'`embassy-time` et `embassy-sync`,
-> ce qui causait des conflits avec les projets Embassy utilisant une source git.
-> La version 0.2.x corrigeait cela mais utilisait un seuil fixe non documenté.
-> La **0.3.0** expose le seuil en paramètre avec des constantes prêtes à l'emploi.
+> ⚠️ **La version 0.2.x et 0.3.x sont  obsolètes.** Elle utilisait un seuil fixe non documenté.
+> La **0.4.0** expose le seuil en paramètre, utilise `embassy-time` pour les délais
+> et `embedded-hal` uniquement pour les traits de pin — compatible avec toutes les cartes Embassy.
 
 ---
 
 ## Fonctionnalités
 
-- Entièrement asynchrone via `embedded-hal-async`
-- **Aucune dépendance Embassy** — zéro conflit de versions
+- Entièrement asynchrone via `embassy-time`
+- **Compatible toutes cartes Embassy** — `embassy-rp`, `embassy-stm32`, `embassy-nrf`, etc.
 - **Aucun timer hardware requis** — mesure des bits par comptage de boucles
 - Seuil de détection **passé en paramètre** — portable sur tout MCU
 - Constantes précalibrées pour la Pico 2 et la Pico 1
@@ -28,6 +27,9 @@ Compatible avec toutes les cartes via [`embedded-hal`](https://github.com/rust-e
 ```toml
 [dependencies]
 embassy-am2302 = "0.3"
+embassy-time   = { version = "0.4.0" }
+embassy-sync   = { version = "0.6.0" }
+embedded-hal   = { version = "1.0" }
 ```
 
 ---
@@ -37,7 +39,7 @@ embassy-am2302 = "0.3"
 ```rust
 use embassy_am2302::{am2302_read, PICO2_BIT_THRESHOLD};
 
-match am2302_read(&mut pin, &mut delay, PICO2_BIT_THRESHOLD).await {
+match am2302_read(&mut pin, PICO2_BIT_THRESHOLD).await {
     Ok(data)                           => defmt::info!("{}°C  {}%", data.temp, data.hum),
     Err(Am2302Error::ChecksumMismatch) => defmt::warn!("Données corrompues"),
     Err(Am2302Error::Timeout)          => defmt::warn!("Capteur ne répond pas"),
@@ -49,14 +51,13 @@ match am2302_read(&mut pin, &mut delay, PICO2_BIT_THRESHOLD).await {
 
 ## Constantes de seuil
 
-| Constante | Carte | Fréquence |
-|-----------|-------|-----------|
-| `PICO2_BIT_THRESHOLD` | Raspberry Pi Pico 2 (RP2350) | 150 MHz |
-| `PICO_BIT_THRESHOLD`  | Raspberry Pi Pico (RP2040)   | 125 MHz |
+| Constante             | Carte                        | Fréquence |
+|-----------------------|------------------------------|-----------|
+| `PICO2_BIT_THRESHOLD` | Raspberry Pi Pico 2 (RP2350) | 150 MHz   |
+| `PICO_BIT_THRESHOLD`  | Raspberry Pi Pico (RP2040)   | 125 MHz   |
 
 Pour tout autre MCU, calibrez empiriquement ou avec un oscilloscope.
-La valeur correcte se situe entre ~28 µs et ~70 µs selon votre fréquence :
-`threshold = fréquence_mhz * 28 / 1000` comme point de départ.
+Formule de départ : `threshold = fréquence_mhz * 28 / 1000`.
 
 ---
 
@@ -75,15 +76,14 @@ pub static ENV_SIGNAL: Signal<CriticalSectionRawMutex, EnvData> = Signal::new();
 
 ```rust
 use embassy_rp::gpio::Flex;
-use embassy_time::{Duration, Timer, Delay};
+use embassy_time::{Duration, Timer};
 use embassy_am2302::{am2302_read, PICO2_BIT_THRESHOLD};
 use crate::signals::ENV_SIGNAL;
 
 #[embassy_executor::task]
 pub async fn am2302_task(mut pin: Flex<'static>) {
-    let mut delay = Delay;
     loop {
-        if let Ok(data) = am2302_read(&mut pin, &mut delay, PICO2_BIT_THRESHOLD).await {
+        if let Ok(data) = am2302_read(&mut pin, PICO2_BIT_THRESHOLD).await {
             ENV_SIGNAL.signal(data);
         }
         Timer::after(Duration::from_secs(3)).await;
@@ -150,27 +150,31 @@ spawner.spawn(tasks::lcd_task(lcd)).unwrap();
 
 ---
 
-## Pourquoi un seuil en paramètre ?
+## Pourquoi `embedded-hal` pour les pins et `embassy-time` pour les délais ?
 
 Le DHT22 encode ses bits par la **durée relative** du signal haut (~28 µs pour un `0`,
 ~70 µs pour un `1`). Cette crate mesure cette durée par comptage d'itérations de boucle,
-ce qui évite toute dépendance à `embassy-time` et tout conflit de versions.
+ce qui évite tout timer hardware.
 
-En contrepartie, le nombre d'itérations correspondant à 28–70 µs varie selon la fréquence
-du MCU. Exposer ce seuil en paramètre plutôt que de le coder en dur rend la crate portable
-sans introduire la moindre dépendance Embassy.
+En revanche, le **signal de start de 20 ms** doit être précis — `embassy-time::Timer`
+garantit ce délai sans bloquer le CPU ni dépendre d'un HAL spécifique.
+
+Les traits `InputPin`/`OutputPin` d'`embedded-hal` permettent d'accepter n'importe quelle
+broche Embassy (`Flex` de rp, stm32, nrf…) sans lier la crate à un MCU particulier.
 
 ---
 
 ## Migration depuis 0.2.x
 
-| 0.2.x | 0.3.0 |
+| 0.2.x | 0.4.0 |
 |-------|-------|
-| `am2302_read(&mut pin, &mut delay)` | `am2302_read(&mut pin, &mut delay, PICO2_BIT_THRESHOLD)` |
-| Seuil fixe interne (40) | Seuil explicite passé en argument |
-| Non documenté pour autres MCU | Constantes fournies + formule de calibration |
+| `am2302_read(&mut pin, &mut delay, threshold)` | `am2302_read(&mut pin, threshold)` |
+| `delay` passé en paramètre (`embedded-hal-async`) | `embassy-time` utilisé en interne |
+| Dépendance `embedded-hal-async` | Supprimée — remplacée par `embassy-time` |
 
 ---
+  
+Copyright (C) 2026 Jorge Andre Castro
 
 ## Licence
 
