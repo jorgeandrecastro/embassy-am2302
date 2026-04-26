@@ -1,4 +1,4 @@
-# embassy-am2302 (v0.5.1) 🦅
+# embassy-am2302 (v0.5.2) 🦅
 
 [![Crates.io](https://img.shields.io/crates/v/embassy-am2302.svg)](https://crates.io/crates/embassy-am2302)
 [![Documentation](https://docs.rs/embassy-am2302/badge.svg)](https://docs.rs/embassy-am2302)
@@ -18,7 +18,7 @@ Ces versions anciennes souffrent de :
 - Incompatibilités avec le système de signaux
 - Comportements instables en async
 
-**Utilisez obligatoirement la v0.5.1 ou supérieure.**
+**Utilisez obligatoirement la v0.5.2 ou supérieure.**
 
 ## 🔴 ATTENTION CRITIQUE
 
