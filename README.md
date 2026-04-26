@@ -1,8 +1,12 @@
 # embassy-am2302 (v0.5.1) 🦅
 
+[![Crates.io](https://img.shields.io/crates/v/embassy-am2302.svg)](https://crates.io/crates/embassy-am2302)
+[![Documentation](https://docs.rs/embassy-am2302/badge.svg)](https://docs.rs/embassy-am2302)
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](https://opensource.org/licenses/GPL-2.0-or-later)
+
 Driver async no_std pour le capteur de température et d'humidité AM2302 (DHT22).
 
-Conçu spécifiquement pour l'écosystème Embassy (embassy-time, embassy-sync) et optimisé pour les performances du RP2350 (Pico 2).
+Conçu spécifiquement pour l'écosystème Embassy (embassy-time, embassy-sync).
 
 ## ⚠️ VERSIONS DÉPRÉCIÉES
 
@@ -25,17 +29,20 @@ Ces versions anciennes souffrent de :
 - **Async Natif** : Entièrement non-bloquant via embassy-time.
 - **Calibration RP2350** : Testé et validé sur Pico 2 avec des seuils adaptés à la vitesse du processeur.
 - **Découplage Inter-tâches** : Module signals intégré pour une communication thread-safe entre vos tâches.
-- **Zéro Allocation** : Idéal pour les systèmes bare-metal et les kernels comme JC-OS.
+- **Zéro Allocation** : Idéal pour les systèmes bare-metal .
+
+----
 
 ## Installation
 
 ```toml
 [dependencies]
-embassy-am2302 = "0.5.1"
-embassy-time   = { version = "0.4.0" }
-embassy-sync   = { version = "0.6.0" }
-embedded-hal   = { version = "1.0" }
+embassy-am2302 = "0.5.2"
+embassy-time  = { version = ">=0.3, <0.6" }
+embassy-sync  = { version = ">=0.4, <0.9" }
+embedded-hal  = { version = "1.0" } 
 ```
+----
 
 ## Constantes de seuil (Calibration)
 
@@ -48,9 +55,11 @@ Le DHT22 mesure la durée des impulsions. La vitesse du processeur influence le 
 
 **Note** : Si vous utilisez des câbles longs, privilégiez un seuil plus élevé.
 
+---
+
 ## Exemple Complet : Intégration JC-OS (LCD + Capteur)
 
-Voici comment orchestrer le capteur et un écran LCD HD44780 en utilisant le multitâche Embassy.
+**Voici comment orchestrer le capteur et un écran LCD HD44780 en utilisant le multitâche Embassy.**
 
 ```rust
 #![no_std]
@@ -101,6 +110,7 @@ async fn display_task(mut lcd: LcdI2c<I2c<'static, embassy_rp::peripherals::I2C0
     }
 }
 ```
+---
 
 ## Schéma de Câblage (Pico 2)
 
@@ -111,6 +121,8 @@ Pour éviter les erreurs 999.0 (Sensor Error), respectez scrupuleusement ce mont
 - **GND** : Masse commune.
 - **PULL-UP** : Ajoutez une résistance physique de 4.7kΩ entre DATA et 3.3V.
 
+---
+
 ## Pourquoi cette architecture ?
 
 L'utilisation du ENV_SIGNAL intégré permet un découplage total :
@@ -119,11 +131,21 @@ L'utilisation du ENV_SIGNAL intégré permet un découplage total :
 - Votre tâche d'affichage (ou de log) réagit instantanément dès qu'une donnée est disponible.
 - Aucune variable globale risquée (`static mut`), tout passe par un Signal sécurisé par section critique.
 
+----
+
+## 📝 Changelog
+
+Pour voir l'historique complet des changements, des améliorations et des corrections apportées au projet, consultez le fichier [CHANGELOG.md](CHANGELOG.md).
+
+**Version actuelle**: v0.5.2 avec support élargi pour les dépendances Embassy (embassy-time, embassy-sync).
+
+----
+
 ## Copyright
 
 Copyright (C) 2026 Jorge Andre Castro
 
-Signé : The Rust Eagle 🦅
+---
 
 ## Licence
 

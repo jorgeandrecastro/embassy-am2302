@@ -2,6 +2,7 @@
 // GPL-2.0-or-later
 
 #![no_std]
+#![forbid(unsafe_code)]
 
 //! Driver async `no_std` pour le capteur AM2302 (DHT22).
 //! Compatible avec toutes les cartes Embassy via `embedded-hal` (pins)
@@ -62,7 +63,7 @@ pub struct EnvData {
 pub enum Am2302Error<E> {
     /// Timeout pendant le handshake ou la lecture des bits.
     Timeout,
-    /// Checksum invalide — données corrompues ou transmission incomplète.
+    /// Checksum invalide  données corrompues ou transmission incomplète.
     ChecksumMismatch,
     /// Erreur matérielle retournée par le HAL GPIO.
     Gpio(E),
@@ -72,9 +73,9 @@ pub enum Am2302Error<E> {
 ///
 /// # Arguments
 ///
-/// * `pin`           — broche GPIO implémentant [`InputPin`] + [`OutputPin`]
+/// * `pin`            broche GPIO implémentant [`InputPin`] + [`OutputPin`]
 ///   (ex : `embassy_rp::gpio::Flex`, `embassy_stm32::gpio::Flex`, etc.)
-/// * `bit_threshold` — seuil de comptage pour distinguer bit `0` et bit `1`
+/// * `bit_threshold`  seuil de comptage pour distinguer bit `0` et bit `1`
 ///
 /// # Retour
 ///
@@ -87,7 +88,7 @@ pub async fn am2302_read<P, E>(
 where
     P: InputPin<Error = E> + OutputPin<Error = E>,
 {
-    // 1. SIGNAL DE START — 20 ms à l'état bas
+    // 1. SIGNAL DE START 20 ms à l'état bas
     pin.set_low().map_err(Am2302Error::Gpio)?;
     Timer::after(Duration::from_millis(20)).await;
     pin.set_high().map_err(Am2302Error::Gpio)?;
