@@ -1,4 +1,4 @@
-# embassy-am2302 (v0.5.2) 🦅
+# embassy-am2302 (v0.6.0) 🦅
 
 [![Crates.io](https://img.shields.io/crates/v/embassy-am2302.svg)](https://crates.io/crates/embassy-am2302)
 [![Documentation](https://docs.rs/embassy-am2302/badge.svg)](https://docs.rs/embassy-am2302)
@@ -18,11 +18,31 @@ Ces versions anciennes souffrent de :
 - Incompatibilités avec le système de signaux
 - Comportements instables en async
 
-**Utilisez obligatoirement la v0.5.2 ou supérieure.**
+---
 
-## 🔴 ATTENTION CRITIQUE
+# 🔄 Fixed
 
-> La v0.5.1 corrige les conflits de structures EnvData lors de l'utilisation des signaux inter-tâches. C'est l'**unique version stable recommandée** pour tout projet asynchrone.
+**Version actuelle conseillée : v0.6.0**
+
+Dépendances désormais fixées pour une meilleure stabilité
+Amélioration notable par rapport à la version v0.5.2, notamment sur l’écosystème Embassy (embassy-time, embassy-sync)
+Suppression des plages de versions larges afin d’éviter le dependency hell
+
+---
+
+
+## 📝 Changelog
+
+Pour voir l'historique complet des changements, des améliorations et des corrections apportées au projet, consultez le fichier [CHANGELOG.md](CHANGELOG.md).
+
+**Version actuelle** : v0.6.0  
+
+Dépendances désormais fixées pour une meilleure stabilité
+Amélioration notable par rapport à la version v0.5.2, notamment sur l’écosystème Embassy (embassy-time, embassy-sync)
+Suppression des plages de versions larges afin d’éviter le dependency hell
+
+----
+
 
 ## Fonctionnalités
 
@@ -37,10 +57,10 @@ Ces versions anciennes souffrent de :
 
 ```toml
 [dependencies]
-embassy-am2302 = "0.5.2"
-embassy-time  = { version = ">=0.3, <0.6" }
-embassy-sync  = { version = ">=0.4, <0.9" }
-embedded-hal  = { version = "1.0" } 
+embassy-am2302 = "0.6.0"
+embassy-time  = "0.5" 
+embassy-sync  = "0.8" 
+embedded-hal  = "1.0"  
 ```
 ----
 
@@ -57,7 +77,7 @@ Le DHT22 mesure la durée des impulsions. La vitesse du processeur influence le 
 
 ---
 
-## Exemple Complet : Intégration JC-OS (LCD + Capteur)
+## Exemple Complet : Intégration  (LCD + Capteur)
 
 **Voici comment orchestrer le capteur et un écran LCD HD44780 en utilisant le multitâche Embassy.**
 
@@ -112,7 +132,7 @@ async fn display_task(mut lcd: LcdI2c<I2c<'static, embassy_rp::peripherals::I2C0
 ```
 ---
 
-## Schéma de Câblage (Pico 2)
+## Schéma de Câblage (exemple RP2350a)
 
 Pour éviter les erreurs 999.0 (Sensor Error), respectez scrupuleusement ce montage :
 
@@ -133,22 +153,14 @@ L'utilisation du ENV_SIGNAL intégré permet un découplage total :
 
 ----
 
-## 📝 Changelog
+## Licence
 
-Pour voir l'historique complet des changements, des améliorations et des corrections apportées au projet, consultez le fichier [CHANGELOG.md](CHANGELOG.md).
+Ce projet est distribué sous licence GPL-2.0-or-later.
 
-**Version actuelle**: v0.5.2 avec support élargi pour les dépendances Embassy (embassy-time, embassy-sync).
+Voir le fichier LICENSE pour les détails.
 
 ----
 
 ## Copyright
 
 Copyright (C) 2026 Jorge Andre Castro
-
----
-
-## Licence
-
-Ce projet est distribué sous licence GPL-2.0-or-later.
-
-Voir le fichier LICENSE pour les détails.

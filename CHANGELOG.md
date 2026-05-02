@@ -5,6 +5,18 @@ Tous les changements notables de ce projet sont documentés dans ce fichier.
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 et ce projet adhère à [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.6.0] - 2026-05-02
+
+### Fixed
+
+🔄 Update
+Version actuelle conseillée : v0.6.0
+
+Dépendances désormais fixées pour une meilleure stabilité
+Amélioration notable par rapport à la version v0.5.2, notamment sur l’écosystème Embassy (embassy-time, embassy-sync)
+Suppression des plages de versions larges afin d’éviter le dependency hell
+
 ## [0.5.2] - 2026-04-26
 
 ### Changed
