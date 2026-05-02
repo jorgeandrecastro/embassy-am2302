@@ -6,6 +6,14 @@ Le format est basé sur [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 et ce projet adhère à [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.6.1] - 2026-05-02
+
+## Security
+
+- **VCC** :3.3V (recommandé)
+
+
+
 ## [0.6.0] - 2026-05-02
 
 ### Fixed

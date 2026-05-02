@@ -1,4 +1,4 @@
-# embassy-am2302 (v0.6.0) 🦅
+# embassy-am2302 (v0.6.1) 🦅
 
 [![Crates.io](https://img.shields.io/crates/v/embassy-am2302.svg)](https://crates.io/crates/embassy-am2302)
 [![Documentation](https://docs.rs/embassy-am2302/badge.svg)](https://docs.rs/embassy-am2302)
@@ -22,7 +22,7 @@ Ces versions anciennes souffrent de :
 
 # 🔄 Fixed
 
-**Version actuelle conseillée : v0.6.0**
+**Version actuelle conseillée : v0.6.1**
 
 Dépendances désormais fixées pour une meilleure stabilité
 Amélioration notable par rapport à la version v0.5.2, notamment sur l’écosystème Embassy (embassy-time, embassy-sync)
@@ -30,19 +30,17 @@ Suppression des plages de versions larges afin d’éviter le dependency hell
 
 ---
 
-
 ## 📝 Changelog
 
 Pour voir l'historique complet des changements, des améliorations et des corrections apportées au projet, consultez le fichier [CHANGELOG.md](CHANGELOG.md).
 
-**Version actuelle** : v0.6.0  
+**Version actuelle** : v0.6.1 
 
 Dépendances désormais fixées pour une meilleure stabilité
 Amélioration notable par rapport à la version v0.5.2, notamment sur l’écosystème Embassy (embassy-time, embassy-sync)
 Suppression des plages de versions larges afin d’éviter le dependency hell
 
 ----
-
 
 ## Fonctionnalités
 
@@ -57,7 +55,7 @@ Suppression des plages de versions larges afin d’éviter le dependency hell
 
 ```toml
 [dependencies]
-embassy-am2302 = "0.6.0"
+embassy-am2302 = "0.6.1"
 embassy-time  = "0.5" 
 embassy-sync  = "0.8" 
 embedded-hal  = "1.0"  
@@ -136,7 +134,7 @@ async fn display_task(mut lcd: LcdI2c<I2c<'static, embassy_rp::peripherals::I2C0
 
 Pour éviter les erreurs 999.0 (Sensor Error), respectez scrupuleusement ce montage :
 
-- **VCC** : Reliez au VBUS (5V) pour plus de stabilité.
+- **VCC** :3.3V (recommandé)
 - **DATA** : Pin GP22 (Pin 29 physique).
 - **GND** : Masse commune.
 - **PULL-UP** : Ajoutez une résistance physique de 4.7kΩ entre DATA et 3.3V.
